@@ -1,0 +1,117 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C 扩展编译产物
+*.so
+
+# 包构建 / 分发
+build/
+dist/
+develop-eggs/
+eggs/
+.eggs/
+sdist/
+wheels/
+share/python-wheels/
+*.egg-info/
+*.egg
+MANIFEST
+pip-wheel-metadata/
+
+# 安装记录
+*.egg
+.installed.cfg
+
+# =========================
+# 虚拟环境
+# =========================
+.venv/
+venv/
+env/
+ENV/
+. env/
+virtualenv/
+
+# =========================
+# 测试 / 覆盖率
+# =========================
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+.benchmarks/
+
+# =========================
+# 类型检查 / Lint 缓存
+# =========================
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+.pyre/
+.pytype/
+
+# =========================
+# Jupyter
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# 日志 / 临时文件
+# =========================
+*.log
+*.pot
+*.pyc
+*.pyo
+*.pyd
+.cache/
+tmp/
+temp/
+
+# =========================
+# 环境变量 / 密钥
+# =========================
+.env
+.env.*
+!.env.example
+!.env.template
+*.pem
+*.key
+
+# =========================
+# IDE / 编辑器
+# =========================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# =========================
+# 操作系统
+# =========================
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# =========================
+# 其他常见
+# =========================
+*.sqlite3
+*.db
+instance/
+.python-version
