@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>AI 助手 · 数据查询与页面跳转</title>
 
-  <!-- Markdown 渲染 + XSS 清洗 + 代码高亮 -->
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css">
@@ -36,29 +35,30 @@
       font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
       color: var(--ink);
       background:
-        radial-gradient(1200px 600px at 10% -10%, #e8ecff 0%, transparent 60%),
-        radial-gradient(1000px 500px at 110% 10%, #f3e8ff 0%, transparent 55%),
+        radial-gradient(1400px 700px at 10% -10%, #e8ecff 0%, transparent 60%),
+        radial-gradient(1200px 600px at 110% 10%, #f3e8ff 0%, transparent 55%),
         var(--bg);
       display: flex;
       justify-content: center;
     }
 
+    /* ---------- 整体容器（加宽） ---------- */
     .app {
       width: 100%;
-      max-width: 860px;
+      max-width: 1360px;
       height: 100dvh;
       display: flex;
       flex-direction: column;
-      padding: 16px;
-      gap: 12px;
+      padding: 20px 24px;
+      gap: 14px;
     }
 
     /* ---------- 头部 ---------- */
     header {
       display: flex;
       align-items: center;
-      gap: 12px;
-      padding: 14px 18px;
+      gap: 14px;
+      padding: 16px 22px;
       background: rgba(255, 255, 255, .78);
       backdrop-filter: blur(14px);
       -webkit-backdrop-filter: blur(14px);
@@ -68,8 +68,8 @@
     }
 
     .logo {
-      width: 38px;
-      height: 38px;
+      width: 40px;
+      height: 40px;
       border-radius: 12px;
       background: linear-gradient(135deg, var(--brand), var(--brand-2));
       display: grid;
@@ -81,8 +81,8 @@
       box-shadow: 0 6px 16px rgba(79, 110, 247, .35);
     }
 
-    .title { font-size: 16px; font-weight: 600; letter-spacing: .2px; }
-    .subtitle { font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
+    .title { font-size: 17px; font-weight: 600; letter-spacing: .2px; }
+    .subtitle { font-size: 12.5px; color: var(--ink-soft); margin-top: 2px; }
 
     .status {
       margin-left: auto;
@@ -93,7 +93,7 @@
       color: #12a150;
       background: #e9f9f0;
       border: 1px solid #c9f0da;
-      padding: 5px 10px;
+      padding: 5px 12px;
       border-radius: 999px;
       white-space: nowrap;
     }
@@ -111,10 +111,10 @@
     #chat {
       flex: 1;
       overflow-y: auto;
-      padding: 8px 4px 4px;
+      padding: 12px 12px 8px;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 18px;
       scroll-behavior: smooth;
     }
     #chat::-webkit-scrollbar { width: 8px; }
@@ -123,7 +123,7 @@
 
     .msg {
       display: flex;
-      gap: 10px;
+      gap: 12px;
       align-items: flex-start;
       animation: rise .28s ease both;
     }
@@ -135,7 +135,7 @@
     .msg.user { flex-direction: row-reverse; }
 
     .avatar {
-      width: 32px; height: 32px;
+      width: 34px; height: 34px;
       border-radius: 50%;
       flex: none;
       display: grid;
@@ -148,13 +148,14 @@
     .msg.assistant .avatar { background: linear-gradient(135deg, var(--brand), var(--brand-2)); }
     .msg.user .avatar { background: linear-gradient(135deg, #94a3b8, #64748b); }
 
-    .body { max-width: min(78%, 620px); min-width: 0; }
+    /* ---------- 气泡（加宽） ---------- */
+    .body { max-width: min(72%, 900px); min-width: 0; }
 
     .bubble {
-      padding: 12px 16px;
+      padding: 14px 18px;
       border-radius: 14px;
-      line-height: 1.7;
-      font-size: 15px;
+      line-height: 1.75;
+      font-size: 15.5px;
       word-break: break-word;
       overflow-wrap: anywhere;
     }
@@ -177,14 +178,14 @@
       display: inline-flex;
       align-items: center;
       gap: 10px;
-      margin-top: 10px;
-      padding: 10px 14px;
+      margin-top: 12px;
+      padding: 11px 16px;
       background: var(--brand-soft);
       border: 1px solid #d6e0ff;
       border-radius: 12px;
       color: #3346b8;
       font-weight: 500;
-      font-size: 14px;
+      font-size: 14.5px;
       text-decoration: none;
       transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
     }
@@ -195,38 +196,38 @@
     }
     .nav-card .arrow { font-size: 15px; }
     .nav-card .url-hint {
-      font-size: 11px;
+      font-size: 11.5px;
       color: #8a95c9;
       font-weight: 400;
-      max-width: 260px;
+      max-width: 380px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
 
-    /* ---------- Markdown 内容样式 ---------- */
+    /* ---------- Markdown 内容 ---------- */
     .bubble > :first-child { margin-top: 0; }
     .bubble > :last-child { margin-bottom: 0; }
-    .bubble p { margin: 8px 0; }
+    .bubble p { margin: 9px 0; }
     .bubble h1, .bubble h2, .bubble h3, .bubble h4 {
-      margin: 16px 0 8px;
+      margin: 18px 0 9px;
       line-height: 1.35;
       font-weight: 600;
     }
-    .bubble h1 { font-size: 19px; }
-    .bubble h2 { font-size: 17px; }
-    .bubble h3 { font-size: 15.5px; }
-    .bubble h4 { font-size: 15px; }
-    .bubble ul, .bubble ol { margin: 8px 0; padding-left: 22px; }
-    .bubble li { margin: 4px 0; }
+    .bubble h1 { font-size: 20px; }
+    .bubble h2 { font-size: 18px; }
+    .bubble h3 { font-size: 16px; }
+    .bubble h4 { font-size: 15.5px; }
+    .bubble ul, .bubble ol { margin: 9px 0; padding-left: 24px; }
+    .bubble li { margin: 5px 0; }
     .bubble li > p { margin: 2px 0; }
     .bubble a { color: var(--brand); text-decoration: none; border-bottom: 1px dashed rgba(79,110,247,.5); }
     .bubble a:hover { border-bottom-style: solid; }
     .bubble strong { font-weight: 600; }
-    .bubble hr { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
+    .bubble hr { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
     .bubble blockquote {
-      margin: 10px 0;
-      padding: 6px 14px;
+      margin: 12px 0;
+      padding: 8px 16px;
       border-left: 3px solid #c9d4ff;
       background: #f8faff;
       color: #4a5169;
@@ -234,15 +235,15 @@
     }
     .bubble code {
       font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-      font-size: 13px;
+      font-size: 13.5px;
       background: #f1f3f9;
       border: 1px solid #e6e9f0;
-      padding: 1px 6px;
+      padding: 2px 6px;
       border-radius: 6px;
     }
     .bubble pre {
-      margin: 12px 0;
-      padding: 14px 16px;
+      margin: 14px 0;
+      padding: 16px 18px;
       background: #f8f9fc;
       border: 1px solid var(--line);
       border-radius: 12px;
@@ -252,19 +253,19 @@
       background: none;
       border: none;
       padding: 0;
-      font-size: 13px;
-      line-height: 1.6;
+      font-size: 13.5px;
+      line-height: 1.65;
       display: block;
     }
     .bubble table {
       border-collapse: collapse;
       width: 100%;
-      margin: 12px 0;
-      font-size: 14px;
+      margin: 14px 0;
+      font-size: 14.5px;
     }
     .bubble th, .bubble td {
       border: 1px solid var(--line);
-      padding: 8px 12px;
+      padding: 10px 14px;
       text-align: left;
     }
     .bubble th { background: #f6f8fd; font-weight: 600; }
@@ -284,34 +285,34 @@
       40% { transform: scale(1); opacity: 1; }
     }
 
-    /* ---------- 空状态 / 快捷示例 ---------- */
+    /* ---------- 空状态 ---------- */
     .empty {
       margin: auto;
       text-align: center;
-      max-width: 520px;
-      padding: 20px;
+      max-width: 620px;
+      padding: 24px;
       animation: rise .4s ease both;
     }
     .empty .big {
-      width: 64px; height: 64px;
-      margin: 0 auto 16px;
-      border-radius: 20px;
+      width: 72px; height: 72px;
+      margin: 0 auto 18px;
+      border-radius: 22px;
       background: linear-gradient(135deg, var(--brand), var(--brand-2));
       display: grid;
       place-items: center;
       color: #fff;
-      font-size: 28px;
+      font-size: 30px;
       box-shadow: 0 12px 28px rgba(79, 110, 247, .3);
     }
-    .empty h2 { font-size: 18px; margin: 0 0 8px; }
-    .empty p { color: var(--ink-soft); font-size: 14px; margin: 0 0 20px; line-height: 1.6; }
+    .empty h2 { font-size: 20px; margin: 0 0 10px; }
+    .empty p { color: var(--ink-soft); font-size: 14.5px; margin: 0 0 24px; line-height: 1.7; }
     .chips { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
     .chip {
-      padding: 9px 14px;
+      padding: 10px 16px;
       background: #fff;
       border: 1px solid var(--line);
       border-radius: 999px;
-      font-size: 13.5px;
+      font-size: 14px;
       color: #3a4157;
       cursor: pointer;
       transition: all .15s ease;
@@ -328,8 +329,8 @@
     .composer {
       display: flex;
       align-items: flex-end;
-      gap: 10px;
-      padding: 10px 12px;
+      gap: 12px;
+      padding: 12px 14px;
       background: rgba(255, 255, 255, .85);
       backdrop-filter: blur(14px);
       -webkit-backdrop-filter: blur(14px);
@@ -344,10 +345,10 @@
       outline: none;
       resize: none;
       font: inherit;
-      font-size: 15px;
-      line-height: 1.5;
-      max-height: 140px;
-      padding: 9px 8px;
+      font-size: 15.5px;
+      line-height: 1.55;
+      max-height: 160px;
+      padding: 10px 10px;
       background: transparent;
       color: var(--ink);
     }
@@ -355,12 +356,12 @@
 
     #send {
       flex: none;
-      width: 42px; height: 42px;
+      width: 44px; height: 44px;
       border: none;
       border-radius: 12px;
       background: linear-gradient(135deg, var(--brand), var(--brand-2));
       color: #fff;
-      font-size: 17px;
+      font-size: 18px;
       cursor: pointer;
       display: grid;
       place-items: center;
@@ -378,11 +379,18 @@
       padding-bottom: 2px;
     }
 
+    /* ---------- 超大屏（27寸 2K/4K）进一步铺开 ---------- */
+    @media (min-width: 1800px) {
+      .app { max-width: 1560px; padding: 24px 40px; }
+      .body { max-width: min(70%, 1000px); }
+      .bubble { font-size: 16px; line-height: 1.8; }
+    }
+
     @media (max-width: 640px) {
       .app { padding: 10px; gap: 10px; }
       header { padding: 12px 14px; }
       .subtitle { display: none; }
-      .body { max-width: 84%; }
+      .body { max-width: 86%; }
       .bubble { font-size: 14.5px; padding: 11px 14px; }
     }
   </style>
@@ -438,7 +446,6 @@
         const container = document.createElement("div");
         container.innerHTML = safeHtml;
 
-        // 外链统一新窗口打开，并加固 rel
         container.querySelectorAll("a").forEach(a => {
           const href = a.getAttribute("href") || "";
           if (!/^https?:\/\//i.test(href)) {
@@ -449,7 +456,6 @@
           a.setAttribute("rel", "noopener noreferrer");
         });
 
-        // 代码高亮（可选，CDN 未加载时自动跳过）
         if (window.hljs) {
           container.querySelectorAll("pre code").forEach(el => {
             try { hljs.highlightElement(el); } catch (_) {}
@@ -457,7 +463,6 @@
         }
         return container.innerHTML;
       }
-      // CDN 加载失败时的兜底：纯文本
       const div = document.createElement("div");
       div.textContent = text;
       return div.innerHTML;
@@ -558,7 +563,7 @@
     /* ---------- 输入框自适应高度 ---------- */
     function autoResize() {
       inputEl.style.height = "auto";
-      inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + "px";
+      inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + "px";
     }
     inputEl.addEventListener("input", autoResize);
 

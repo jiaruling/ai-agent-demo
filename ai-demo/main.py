@@ -7,8 +7,10 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+# 初始化fastapi web服务
 app = FastAPI()
 
+# 初始化大模型客户端
 client = OpenAI(
     api_key=os.environ.get("DEEPSEEK_API_KEY"),
     base_url="https://api.deepseek.com",
@@ -88,13 +90,20 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None
 
 def run_agent(session_id: str, user_message: str):
+    # 第一次请求，session_id 不存在， 新建空列表 SESSIONS = {"abc": []} 并返回它
+    # 同一个 session 的第二次请求，返回已有的那个列表，不会重新创建
     history = SESSIONS.setdefault(session_id, [])
+    # 将新的会话信息加入到会话历史中
     history.append({"role": "user", "content": user_message})
 
+     # 用于收集跳转卡片，最后单独返回给前端
     navigation = None
+    # 模型回复的内容
     reply = ""
 
     for _ in range(5):  # 最多 5 轮，防止模型陷入循环
+        # 第一轮：模型判断是否需要调用工具
+        # 第二轮：模型看到工具结果，生成自然语言回答
         response = client.chat.completions.create(
             model="deepseek-flash",
             messages=history,
@@ -103,22 +112,31 @@ def run_agent(session_id: str, user_message: str):
         )
         msg = response.choices[0].message
 
+        # 不需要调用工具，获取会话结果直接返回
         if not msg.tool_calls:
             reply = msg.content or ""
+            # 将模型回复加入会话历史
             history.append({"role": "assistant", "content": reply})
+            # 返回模型回复内容
             return {"reply": reply, "navigation": navigation}
 
+        # 将模型回复加入会话历史
         history.append(msg)
         for tc in msg.tool_calls:
+            # 获取工具名
             name = tc.function.name
             try:
+                # 获取工具参数
                 args = json.loads(tc.function.arguments)
             except json.JSONDecodeError:
                 args = {}
+            # 获取工具对应的方法
             handler = TOOL_HANDLERS.get(name)
+            # 调用工具获取返回结果（确定性的结果）
             result = handler(args) if handler else {"error": f"未知工具：{name}"}
             if isinstance(result, dict) and result.get("type") == "navigation":
                 navigation = result
+            # 将工具返回结果，加入会话历史
             history.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
@@ -129,9 +147,9 @@ def run_agent(session_id: str, user_message: str):
 
 @app.post("/api/chat")
 def chat(req: ChatRequest):
-    session_id = req.session_id or str(uuid.uuid4())
+    session_id = req.session_id or str(uuid.uuid4()) # 获取session_id如果没有就新建
     result = run_agent(session_id, req.message)
-    return {"session_id": session_id, **result}
+    return {"session_id": session_id, **result} # 返回session_id和agent的回复
 
 @app.get("/")
 def index():
