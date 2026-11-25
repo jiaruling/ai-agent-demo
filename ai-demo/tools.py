@@ -1,5 +1,5 @@
 # ---------- 工具定义 ----------
-from page_registry import PAGE_REGISTRY
+from page import PAGE_REGISTRY
 
 BASE_URL_BACKEND = "http://192.168.11.200:8889"
 
@@ -226,3 +226,40 @@ TOOLS = [
         ["page_id"],
     ),
 ]
+
+TOOL_API_ROUTES = {
+    "login": ("POST", "/api/v1/login"),
+    "logout": ("POST", "/api/v1/logout"),
+    "health": ("GET", "/api/v1/health"),
+    "get_config": ("GET", "/api/v1/config"),
+    "list_api_resources": ("GET", "/api/v1/api-resources"),
+    "get_api_resource": ("GET", "/api/v1/api-resources/:apiResourceID"),
+    "list_login_logs": ("GET", "/api/v1/login/logs"),
+    "list_operation_logs": ("GET", "/api/v1/operation/logs"),
+    "list_departments": ("GET", "/api/v1/depts"),
+    "get_department_tree": ("GET", "/api/v1/depts/tree"),
+    "list_department_users": ("GET", "/api/v1/depts/:departmentID/users"),
+    "get_department": ("GET", "/api/v1/depts/:departmentID"),
+    "list_devices": ("GET", "/api/v1/devices"),
+    "get_device": ("GET", "/api/v1/devices/:deviceID"),
+    "get_accessible_menu_tree": ("GET", "/api/v1/menus/tree"),
+    "get_current_access": ("GET", "/api/v1/me/access"),
+    "list_menus": ("GET", "/api/v1/menus"),
+    "get_menu": ("GET", "/api/v1/menus/:menuID"),
+    "list_models": ("GET", "/api/v1/models"),
+    "get_model": ("GET", "/api/v1/models/:modelID"),
+    "list_roles": ("GET", "/api/v1/roles"),
+    "get_role_list": ("GET", "/api/v1/roles/list"),
+    "get_role": ("GET", "/api/v1/roles/:roleID"),
+    "list_role_users": ("GET", "/api/v1/roles/:roleID/users"),
+    "get_role_permission_ids": ("GET", "/api/v1/roles/:roleID/permissions/ids"),
+    "list_scheduler_tasks": ("GET", "/api/v1/scheduler/tasks"),
+    "get_scheduler_task": ("GET", "/api/v1/scheduler/tasks/:taskID"),
+    "get_scheduler_state": ("GET", "/api/v1/scheduler"),
+    "list_signals": ("GET", "/api/v1/signals"),
+    "get_signal": ("GET", "/api/v1/signals/:signalID"),
+    "get_system_runtime": ("GET", "/api/v1/system/runtime"),
+    "get_system_status": ("GET", "/api/v1/system/status"),
+    "list_users": ("GET", "/api/v1/users"),
+    "get_user": ("GET", "/api/v1/users/:userID"),
+}

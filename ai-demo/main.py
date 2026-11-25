@@ -1,14 +1,19 @@
 import os
 import json
 import uuid
-from typing import Optional
+import re
+from typing import Any, Optional
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlencode
+from urllib.request import Request, urlopen
 from openai import OpenAI
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from tools import TOOLS, BASE_URL_BACKEND
+from tools import TOOLS, BASE_URL_BACKEND, TOOL_API_ROUTES
 from page import PAGE_REGISTRY,BASE_URL_FRONT
+
 # 初始化fastapi web服务
 app = FastAPI()
 
@@ -18,60 +23,8 @@ client = OpenAI(
     base_url="https://api.deepseek.com",
 )
 
-# ---------- 页面注册表 ----------
-# PAGE_REGISTRY = {
-#     "order_list":   {"title": "订单列表", "path": "/orders?range={date_range}"},
-#     "user_profile": {"title": "个人中心", "path": "/profile"},
-#     "dashboard":    {"title": "数据看板", "path": "/dashboard"},
-# }
-# BASE_URL = "http://localhost:3000"  # demo 用假域名，接入真实系统时改掉
-
-# ---------- 工具定义 ----------
-# tools = [
-#     {
-#         "type": "function",
-#         "function": {
-#             "name": "query_data",
-#             "description": "查询业务数据，支持按时间范围查询订单数量或订单列表。只在用户需要查询数据时使用。",
-#             "parameters": {
-#                 "type": "object",
-#                 "properties": {
-#                     "query_type": {"type": "string", "enum": ["order_count", "order_list"],
-#                                    "description": "order_count 返回数量，order_list 返回列表"},
-#                     "date_range": {"type": "string", "description": "时间范围，如 '2025-01'"},
-#                 },
-#                 "required": ["query_type", "date_range"],
-#             },
-#         },
-#     },
-#     {
-#         "type": "function",
-#         "function": {
-#             "name": "navigate_to_page",
-#             "description": "跳转到内部系统指定页面。只在用户明确要求打开、跳转、进入某个页面时使用。",
-#             "parameters": {
-#                 "type": "object",
-#                 "properties": {
-#                     "page_id": {"type": "string",
-#                                 "enum": ["order_list", "user_profile", "dashboard"],
-#                                 "description": "order_list=订单列表, user_profile=个人中心, dashboard=数据看板"},
-#                     "date_range": {"type": "string", "description": "可选，跳订单列表时可带时间范围"},
-#                 },
-#                 "required": ["page_id"],
-#             },
-#         },
-#     },
-# ]
 
 # ---------- 工具执行函数 ----------
-def query_data(query_type, date_range):
-    if query_type == "order_count":
-        return {"count": 99, "range": date_range}
-    return {"orders": [
-        {"id": "ORD-001", "status": "待处理"},
-        {"id": "ORD-002", "status": "已完成"},
-    ], "range": date_range}
-
 def navigate_to_page(page_id):
     page = PAGE_REGISTRY.get(page_id)
     if not page:
@@ -79,10 +32,122 @@ def navigate_to_page(page_id):
     path = page["path"]
     return {"type": "navigation", "label": page["title"], "url": f"{BASE_URL_FRONT}{path}"}
 
-TOOL_HANDLERS = {
-    "query_data":       lambda args: query_data(args["query_type"], args["date_range"]),
-    "navigate_to_page": lambda args: navigate_to_page(args["page_id"]),
-}
+# JWTs are kept per chat session so different users cannot share an API login.
+SESSION_TOKENS: dict[str, dict[str, str]] = {}
+
+
+def _decode_api_response(body: bytes, charset: str | None = None) -> Any:
+    if not body:
+        return None
+    text = body.decode(charset or "utf-8", errors="replace")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return text
+
+
+def _call_backend_tool(name: str, args: dict, session_id: str) -> Any:
+    route = TOOL_API_ROUTES.get(name)
+    if route is None:
+        return {"error": f"未知工具：{name}"}
+
+    method, path_template = route
+    path_params = re.findall(r":([A-Za-z][A-Za-z0-9_]*)", path_template)
+    for param in path_params:
+        if param not in args:
+            return {"error": f"工具 {name} 缺少路径参数：{param}"}
+        path_template = path_template.replace(
+            f":{param}", quote(str(args[param]), safe="")
+        )
+
+    headers = {"Accept": "application/json"}
+    session_tokens = SESSION_TOKENS.get(session_id, {})
+    token = session_tokens.get("accessToken")
+    if token:
+        # The backend, like the frontend service, expects the raw token value.
+        headers["Authorization"] = token
+
+    body = None
+    if name == "login":
+        body = json.dumps(args, ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    query = (
+        {
+            key: value
+            for key, value in args.items()
+            if key not in path_params and value is not None
+        }
+        if method == "GET"
+        else {}
+    )
+    query_string = urlencode(query, doseq=True)
+    url = f"{BASE_URL_BACKEND.rstrip('/')}{path_template}"
+    if query_string:
+        url = f"{url}?{query_string}"
+
+    request = Request(url, data=body, headers=headers, method=method)
+    try:
+        with urlopen(request, timeout=30) as response:
+            result = _decode_api_response(
+                response.read(), response.headers.get_content_charset()
+            )
+    except HTTPError as error:
+        with error:
+            details = _decode_api_response(
+                error.read(), error.headers.get_content_charset()
+            )
+        message = details
+        if isinstance(details, dict):
+            message = details.get("msg") or details.get("message") or details
+        return {"error": str(message), "status_code": error.code, "details": details}
+    except (URLError, TimeoutError) as error:
+        return {"error": f"请求后端接口失败：{error}"}
+
+    if name == "login":
+        login_result = result
+        if isinstance(result, dict) and "code" in result and "data" in result:
+            if result["code"] not in (0, "0"):
+                return {"error": result.get("msg") or "登录失败"}
+            login_result = result["data"]
+
+        if not isinstance(login_result, dict):
+            return {"error": "登录接口返回的数据格式无效"}
+        access_token = login_result.get("accessToken")
+        refresh_token = login_result.get("refreshToken")
+        if not isinstance(access_token, str) or not access_token:
+            return {"error": "登录接口未返回有效 accessToken"}
+        if not isinstance(refresh_token, str) or not refresh_token:
+            return {"error": "登录接口未返回有效 refreshToken"}
+
+        SESSION_TOKENS[session_id] = {
+            "accessToken": access_token,
+            "refreshToken": refresh_token,
+        }
+        # Do not pass access/refresh tokens back into the model conversation.
+        return {
+            key: value for key, value in login_result.items()
+            if key not in ("accessToken", "refreshToken")
+        }
+
+    if name == "logout" and not (
+        isinstance(result, dict) and result.get("error")
+    ):
+        SESSION_TOKENS.pop(session_id, None)
+
+    return result
+
+
+def _execute_tool(name: str, args: Any, session_id: str) -> Any:
+    if not isinstance(args, dict):
+        return {"error": f"工具 {name} 的参数必须是 JSON 对象"}
+    if name == "navigate_to_page":
+        page_id = args.get("page_id")
+        if not isinstance(page_id, str):
+            return {"error": "工具 navigate_to_page 缺少有效参数：page_id"}
+        return navigate_to_page(page_id)
+    return _call_backend_tool(name, args, session_id)
+
 
 # ---------- 会话历史 ----------
 SESSIONS: dict[str, list] = {}
@@ -176,13 +241,15 @@ def plan_task(history: list) -> list[str]:
 # 执行阶段：单个步骤的 Agent 循环
 # ============================================================
 
-AGENT_SYSTEM = """你是一个内部系统的智能助手，可以调用工具查询数据或跳转页面。
-- 查询数据用 query_data
-- 跳转页面用 navigate_to_page
+AGENT_SYSTEM = """你是一个内部系统的智能助手，可以调用已定义的工具查询系统数据或跳转页面。
+- 需要账号认证的接口，在调用前先使用 login 登录
+- 跳转页面使用 navigate_to_page
 只完成当前任务，不要发散，不要重复前面已完成的操作。
 """
 
-def _agent_loop(messages: list, max_rounds: int = 5) -> tuple[str, dict | None]:
+def _agent_loop(
+    messages: list, session_id: str, max_rounds: int = 5
+) -> tuple[str, dict | None]:
     """核心 Agent 循环：决策 → 调工具 → 再决策，直到模型不再请求工具"""
     navigation = None
     for _ in range(max_rounds):
@@ -203,9 +270,9 @@ def _agent_loop(messages: list, max_rounds: int = 5) -> tuple[str, dict | None]:
             try:
                 args = json.loads(tc.function.arguments)
             except json.JSONDecodeError:
-                args = {}
-            handler = TOOL_HANDLERS.get(name)
-            result = handler(args) if handler else {"error": f"未知工具：{name}"}
+                result = {"error": f"工具 {name} 的参数不是有效 JSON"}
+            else:
+                result = _execute_tool(name, args, session_id)
             if isinstance(result, dict) and result.get("type") == "navigation":
                 navigation = result
             messages.append({
@@ -217,7 +284,13 @@ def _agent_loop(messages: list, max_rounds: int = 5) -> tuple[str, dict | None]:
     return "（达到最大轮次，任务未完全结束）", navigation
 
 
-def _execute_step(step: str, index: int, total: int, prior_results: list[str]) -> tuple[str, dict | None]:
+def _execute_step(
+    step: str,
+    index: int,
+    total: int,
+    prior_results: list[str],
+    session_id: str,
+) -> tuple[str, dict | None]:
     """阶段 2：执行单个步骤。前序步骤的结果作为背景注入。"""
     context = ""
     if prior_results:
@@ -230,7 +303,7 @@ def _execute_step(step: str, index: int, total: int, prior_results: list[str]) -
             "content": f"{context}【当前步骤 {index}/{total}】{step}\n（请专注执行这一步，不要重复前面的操作）",
         },
     ]
-    return _agent_loop(messages)
+    return _agent_loop(messages, session_id)
 
 
 def _summarize(steps: list[str], replies: list[str]) -> str:
@@ -260,7 +333,9 @@ def run_agent(session_id: str, user_message: str):
     replies: list[str] = [] # 大模型的回复
 
     for i, step in enumerate(steps, 1): # 计数器从1开始，遍历从列表第一项(0号下标)开始
-        reply, nav = _execute_step(step, i, len(steps), prior_results)
+        reply, nav = _execute_step(
+            step, i, len(steps), prior_results, session_id
+        )
         replies.append(reply)
         prior_results.append(f"步骤{i}「{step}」→ {reply}")
         if nav:
