@@ -3,6 +3,7 @@ import json
 import uuid
 import re
 import tempfile
+import random
 from pathlib import Path
 from threading import Lock
 from typing import Any, Optional
@@ -10,20 +11,23 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 from openai import OpenAI
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from tools import TOOLS, BASE_URL_BACKEND, TOOL_API_ROUTES
 from page import PAGE_REGISTRY,BASE_URL_FRONT
+from session_history import SessionHistory, SessionNotFound
 
 # 初始化fastapi web服务
 app = FastAPI()
 
 # 初始化大模型客户端
 client = OpenAI(
-    api_key=os.environ.get("DEEPSEEK_API_KEY"),
-    base_url="https://api.deepseek.com",
+    # api_key=os.environ.get("DEEPSEEK_API_KEY"), # deepseek的api密钥
+    api_key=os.environ.get("LITELLM_MASTER_KEY"), # 代理的访问密钥
+    # base_url="https://api.deepseek.com",    # deepseek的地址 
+    base_url="http://192.168.11.100:4000/v1", # 代码的访问地址
 )
 
 
@@ -35,11 +39,10 @@ def navigate_to_page(page_id):
     path = page["path"]
     return {"type": "navigation", "label": page["title"], "url": f"{BASE_URL_FRONT}{path}"}
 
-# 持久化系统访问token
 TOKEN_FILE = Path(__file__).resolve().parent / ".env.agent-tokens.json"
 TOKEN_LOCK = Lock()
 
-# 加载系统的访问token
+
 def _load_session_tokens() -> dict[str, dict[str, str]]:
     try:
         with TOKEN_FILE.open("r", encoding="utf-8") as file:
@@ -64,7 +67,7 @@ def _load_session_tokens() -> dict[str, dict[str, str]]:
 
 SESSION_TOKENS: dict[str, dict[str, str]] = _load_session_tokens()
 
-# 更新token
+
 def _update_session_tokens(session_id: str, tokens: dict[str, str] | None) -> None:
     with TOKEN_LOCK:
         updated = SESSION_TOKENS.copy()
@@ -215,7 +218,7 @@ def _execute_tool(name: str, args: Any, session_id: str) -> Any:
 
 
 # ---------- 会话历史 ----------
-SESSIONS: dict[str, list] = {}
+HISTORY = SessionHistory(Path(__file__).resolve().parent / ".env.agent-history.json")
 
 class ChatRequest(BaseModel):
     message: str
@@ -248,7 +251,7 @@ def _clean_history_for_planner(history: list) -> list:
             content = m.get("content") if isinstance(m, dict) else getattr(m, "content", None)
             if content:
                 cleaned.append({"role": role, "content": content})
-    return cleaned[-16:]  # 只取最近 8 轮，够用且省 token
+    return cleaned[-4:]  # 只取最近 2 轮，够用且省 token
 
 def plan_task(history: list) -> list[str]:
     """阶段 1：让模型输出步骤列表。失败时退化为单步执行原请求。"""
@@ -384,9 +387,13 @@ def _summarize(steps: list[str], replies: list[str]) -> str:
 # 主入口：规划 → 逐步执行 → 汇总
 # ============================================================
 
-def run_agent(session_id: str, user_message: str):
-    history = SESSIONS.setdefault(session_id, [])
-    history.append({"role": "user", "content": user_message})
+def run_agent(session_id: str, user_message: str, owner_id: str = "legacy"):
+    with HISTORY.session_lock(session_id):
+        return _run_agent(session_id, user_message, owner_id)
+
+
+def _run_agent(session_id: str, user_message: str, owner_id: str):
+    history = HISTORY.add_user_message(session_id, owner_id, user_message)
 
     # 阶段 1：规划
     steps = plan_task(history)
@@ -412,7 +419,7 @@ def run_agent(session_id: str, user_message: str):
     else:
         final_reply = _summarize(steps, replies)
 
-    history.append({"role": "assistant", "content": final_reply})
+    HISTORY.add_assistant_message(session_id, owner_id, final_reply, navigation)
 
     return {
         "reply": final_reply,
@@ -422,12 +429,49 @@ def run_agent(session_id: str, user_message: str):
 
 
 # ---------- HTTP 接口 ----------
+def _owner_id(client_id: str | None) -> str:
+    if client_id is None:
+        return "legacy"
+    if not re.fullmatch(r"[a-f0-9]{64}", client_id):
+        raise HTTPException(status_code=400, detail="无效的客户端标识")
+    return client_id
+
+
 @app.post("/api/chat")
-def chat(req: ChatRequest):
+def chat(req: ChatRequest, x_client_id: Optional[str] = Header(default=None)):
     session_id = req.session_id or str(uuid.uuid4()) # 获取session_id如果没有就新建
-    result = run_agent(session_id, req.message)
+    try:
+        result = run_agent(session_id, req.message, _owner_id(x_client_id))
+    except SessionNotFound:
+        raise HTTPException(status_code=404, detail="会话不存在")
     return {"session_id": session_id, **result} # 返回session_id和agent的回复
+
+@app.get("/api/sessions")
+def list_sessions(x_client_id: str = Header()):
+    return {"sessions": HISTORY.list_sessions(_owner_id(x_client_id))}
+
+@app.get("/api/sessions/{session_id}")
+def get_session(session_id: str, x_client_id: str = Header()):
+    try:
+        messages = HISTORY.get_messages(session_id, _owner_id(x_client_id))
+    except SessionNotFound:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return {"session_id": session_id, "messages": messages}
+
+@app.get("/api/suggestions")
+def suggestions():
+    examples = [
+        f"打开{page['title']}"
+        for page_id, page in PAGE_REGISTRY.items()
+        if page_id != "login"
+    ]
+    examples.extend(
+        tool["function"]["description"].split("。", 1)[0]
+        for tool in TOOLS
+        if tool["function"]["name"] in ("list_devices", "list_users", "list_departments", "list_roles", "health")
+    )
+    return {"suggestions": random.sample(examples, min(len(examples), random.randint(6, 8)))}
 
 @app.get("/")
 def index():
-    return FileResponse("index.html")
+    return FileResponse(Path(__file__).resolve().parent / "index.html")

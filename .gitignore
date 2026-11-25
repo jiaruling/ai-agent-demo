@@ -115,3 +115,4 @@ Desktop.ini
 *.db
 instance/
 .python-version
+.env.*

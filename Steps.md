@@ -485,13 +485,43 @@ main.py 改完后 uvicorn 会因 --reload 自动重启。终端里会打印 [pla
 这是 LangChain 里 Plan-and-Execute 模式的极简手写版，也是很多生产级 Agent 的骨架。和之前相比，最大的变化是模型开始有“拆任务”的行为了，而不只是“一问一调工具”。
 
 
-
 ## 五、前端渲染跳转卡片
-> 把后端返回的 navigation 结构给前端，用两行 JS 渲染成可点击链接。
+前端渲染跳转卡片，并且打开新的浏览器标签页，跳转到指定的URI。
 
-## 六、本地代理（模拟本地模型） 模拟“本地大模型”：启动一个 OpenAI 兼容代理
-> 用 OpenAI 兼容代理把 base_url 换成 http://127.0.0.1:8787/v1，代码其余不变。
+## 六、模拟“本地大模型”：启动一个 OpenAI 兼容代理
+
+不需要本地部署任何模型，只需要在**本机启动一个轻量的“OpenAI 兼容代理”**，对外暴露一个本地端口，所有请求由它透明转发到 DeepSeek API。你的 Agent 后端代码几乎不用改，只需把 `base_url` 从 `https://api.deepseek.com` 换成本地代理地址，就“**看起来像在调用本地模型**”。
+
+### 现实方案：LiteLLM Proxy（Python 生态，功能最完整）
+
+适合需要模型别名、重试、回退、缓存的生产级场景。安装后通过配置文件启动：
+> LiteLLM 需要另设一个不同于 DeepSeek Key 的主密钥。先准备一个强随机密钥，启动时输入。
+
+```bash
+# 安装依赖
+pip install 'litellm[proxy]'
+
+# 设置密钥
+export DEEPSEEK_API_KEY="deepseek的api key"
+export LITELLM_MASTER_KEY="强随机密钥"
+source ~/.bashrc
+
+# 启动服务
+litellm --model deepseek/deepseek-chat --port 4000
+```
+```python
+# 初始化大模型客户端
+client = OpenAI(
+    # api_key=os.environ.get("DEEPSEEK_API_KEY"),
+    api_key=os.environ.get("LITELLM_MASTER_KEY"),
+    # base_url="https://api.deepseek.com",
+    base_url="http://192.168.11.100:4000/v1",
+)
+```
+
+Agent 连接 `http://127.0.0.1:4000/v1` 时，客户端的 `api_key` 要改用相同的 `LITELLM_MASTER_KEY`；DeepSeek Key 仍由 LiteLLM 进程读取。
+
 
 ## 七、接入真实内部 API
-> 把 mock_query_data 替换成真实 HTTP 调用，同时把用户身份从会话注入（而不是让模型传），这是从 Demo 走向 MVP 的关键一步。
-> 把 mock_query_data 替换成对内部 API 的 HTTP 调用，并把从会话中提取的用户身份注入请求头，接上单元系统的鉴权。这一步是从 Demo 走向 MVP 的关键，建议在 Demo 演示通过后再做
+
+把 mock_query_data 替换成对内部 API 的 HTTP 调用，并把从会话中提取的用户身份注入请求头，接上单元系统的鉴权，这一步是从 Demo 走向 MVP 的关键。
