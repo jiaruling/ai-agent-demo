@@ -2,6 +2,9 @@ import os
 import json
 import uuid
 import re
+import tempfile
+from pathlib import Path
+from threading import Lock
 from typing import Any, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
@@ -32,8 +35,61 @@ def navigate_to_page(page_id):
     path = page["path"]
     return {"type": "navigation", "label": page["title"], "url": f"{BASE_URL_FRONT}{path}"}
 
-# JWTs are kept per chat session so different users cannot share an API login.
-SESSION_TOKENS: dict[str, dict[str, str]] = {}
+# 持久化系统访问token
+TOKEN_FILE = Path(__file__).resolve().parent / ".env.agent-tokens.json"
+TOKEN_LOCK = Lock()
+
+# 加载系统的访问token
+def _load_session_tokens() -> dict[str, dict[str, str]]:
+    try:
+        with TOKEN_FILE.open("r", encoding="utf-8") as file:
+            data = json.load(file)
+    except FileNotFoundError:
+        return {}
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"无法加载本地 Token 文件：{TOKEN_FILE}") from error
+
+    if not isinstance(data, dict) or any(
+        not isinstance(session_id, str)
+        or not isinstance(token, str)
+        or not token
+        for session_id, token in data.items()
+    ):
+        raise ValueError(f"本地 Token 文件格式无效：{TOKEN_FILE}")
+    return {
+        session_id: {"accessToken": token}
+        for session_id, token in data.items()
+    }
+
+
+SESSION_TOKENS: dict[str, dict[str, str]] = _load_session_tokens()
+
+# 更新token
+def _update_session_tokens(session_id: str, tokens: dict[str, str] | None) -> None:
+    with TOKEN_LOCK:
+        updated = SESSION_TOKENS.copy()
+        if tokens is None:
+            updated.pop(session_id, None)
+        else:
+            updated[session_id] = tokens
+
+        persisted = {
+            key: value["accessToken"] for key, value in updated.items()
+        }
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=TOKEN_FILE.parent,
+                prefix=".env.agent-tokens-", delete=False,
+            ) as file:
+                temp_path = Path(file.name)
+                json.dump(persisted, file, ensure_ascii=False)
+            os.replace(temp_path, TOKEN_FILE)
+        finally:
+            if temp_path is not None and temp_path.exists():
+                temp_path.unlink()
+        SESSION_TOKENS.clear()
+        SESSION_TOKENS.update(updated)
 
 
 def _decode_api_response(body: bytes, charset: str | None = None) -> Any:
@@ -61,8 +117,8 @@ def _call_backend_tool(name: str, args: dict, session_id: str) -> Any:
         )
 
     headers = {"Accept": "application/json"}
-    session_tokens = SESSION_TOKENS.get(session_id, {})
-    token = session_tokens.get("accessToken")
+    with TOKEN_LOCK:
+        token = SESSION_TOKENS.get(session_id, {}).get("accessToken")
     if token:
         # The backend, like the frontend service, expects the raw token value.
         headers["Authorization"] = token
@@ -120,10 +176,13 @@ def _call_backend_tool(name: str, args: dict, session_id: str) -> Any:
         if not isinstance(refresh_token, str) or not refresh_token:
             return {"error": "登录接口未返回有效 refreshToken"}
 
-        SESSION_TOKENS[session_id] = {
-            "accessToken": access_token,
-            "refreshToken": refresh_token,
-        }
+        try:
+            _update_session_tokens(session_id, {
+                "accessToken": access_token,
+                "refreshToken": refresh_token,
+            })
+        except OSError as error:
+            return {"error": f"登录成功，但保存本地 Token 失败：{error}"}
         # Do not pass access/refresh tokens back into the model conversation.
         return {
             key: value for key, value in login_result.items()
@@ -131,9 +190,15 @@ def _call_backend_tool(name: str, args: dict, session_id: str) -> Any:
         }
 
     if name == "logout" and not (
-        isinstance(result, dict) and result.get("error")
+        isinstance(result, dict)
+        and (result.get("error") or result.get("code", 0) not in (0, "0"))
     ):
-        SESSION_TOKENS.pop(session_id, None)
+        try:
+            _update_session_tokens(session_id, None)
+        except OSError as error:
+            with TOKEN_LOCK:
+                SESSION_TOKENS.pop(session_id, None)
+            return {"error": f"已退出登录，但删除本地 Token 失败：{error}"}
 
     return result
 
@@ -183,7 +248,7 @@ def _clean_history_for_planner(history: list) -> list:
             content = m.get("content") if isinstance(m, dict) else getattr(m, "content", None)
             if content:
                 cleaned.append({"role": role, "content": content})
-    return cleaned[-4:]  # 只取最近 2 轮，够用且省 token
+    return cleaned[-16:]  # 只取最近 8 轮，够用且省 token
 
 def plan_task(history: list) -> list[str]:
     """阶段 1：让模型输出步骤列表。失败时退化为单步执行原请求。"""
