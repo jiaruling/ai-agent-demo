@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "AI 助手页面跳转",
+  "version": "1.0.0",
+  "description": "复用内部系统标签页，并在手动登录后继续跳转。",
+  "permissions": ["tabs", "scripting", "storage", "webNavigation"],
+  "host_permissions": [
+    "http://192.168.11.200/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://192.168.11.200/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": ["bridge.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

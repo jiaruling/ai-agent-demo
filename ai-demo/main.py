@@ -27,7 +27,7 @@ client = OpenAI(
     # api_key=os.environ.get("DEEPSEEK_API_KEY"), # deepseek的api密钥
     api_key=os.environ.get("LITELLM_MASTER_KEY"), # 代理的访问密钥
     # base_url="https://api.deepseek.com",    # deepseek的地址 
-    base_url="http://192.168.11.100:4000/v1", # 代码的访问地址
+    base_url="http://192.168.11.100:4000/v1", # 代理的访问地址
 )
 
 
@@ -429,6 +429,7 @@ def _run_agent(session_id: str, user_message: str, owner_id: str):
 
 
 # ---------- HTTP 接口 ----------
+# 检查客户端标识（不涉及大模型交互）
 def _owner_id(client_id: str | None) -> str:
     if client_id is None:
         return "legacy"
@@ -436,9 +437,9 @@ def _owner_id(client_id: str | None) -> str:
         raise HTTPException(status_code=400, detail="无效的客户端标识")
     return client_id
 
-
+# 聊天接口
 @app.post("/api/chat")
-def chat(req: ChatRequest, x_client_id: Optional[str] = Header(default=None)):
+def chat(req: ChatRequest, x_client_id: Optional[str] = Header(default=None)): # 读取请求头 X-Client-Id：有值时传给 x_client_id，没有时使用 None
     session_id = req.session_id or str(uuid.uuid4()) # 获取session_id如果没有就新建
     try:
         result = run_agent(session_id, req.message, _owner_id(x_client_id))
@@ -446,10 +447,12 @@ def chat(req: ChatRequest, x_client_id: Optional[str] = Header(default=None)):
         raise HTTPException(status_code=404, detail="会话不存在")
     return {"session_id": session_id, **result} # 返回session_id和agent的回复
 
+# 获取历史会话列表（不涉及大模型交互）
 @app.get("/api/sessions")
 def list_sessions(x_client_id: str = Header()):
     return {"sessions": HISTORY.list_sessions(_owner_id(x_client_id))}
 
+# 返回指定历史会话的内容（不涉及大模型交互）
 @app.get("/api/sessions/{session_id}")
 def get_session(session_id: str, x_client_id: str = Header()):
     try:
@@ -458,20 +461,25 @@ def get_session(session_id: str, x_client_id: str = Header()):
         raise HTTPException(status_code=404, detail="会话不存在")
     return {"session_id": session_id, "messages": messages}
 
+# 推荐操作（不涉及大模型交互）
 @app.get("/api/suggestions")
 def suggestions():
+    # 打开页面
     examples = [
         f"打开{page['title']}"
         for page_id, page in PAGE_REGISTRY.items()
         if page_id != "login"
     ]
+    # 接口查询功能
     examples.extend(
         tool["function"]["description"].split("。", 1)[0]
         for tool in TOOLS
         if tool["function"]["name"] in ("list_devices", "list_users", "list_departments", "list_roles", "health")
     )
+    # 随机返回 6~8 个便捷操作
     return {"suggestions": random.sample(examples, min(len(examples), random.randint(6, 8)))}
 
+# 获取前端交互页面（不涉及大模型交互）
 @app.get("/")
 def index():
     return FileResponse(Path(__file__).resolve().parent / "index.html")
