@@ -1,8 +1,10 @@
 # ---------- 工具定义 ----------
 from page import PAGE_REGISTRY
 
+# 后端基础URL
 BASE_URL_BACKEND = "http://192.168.11.200:8889"
 
+# 工具生成函数
 def _tool(name, description, properties=None, required=None):
     parameters = {
         "type": "object",
@@ -30,6 +32,7 @@ _end_time = {"type": "string", "description": "结束时间，例如 2025-01-31"
 _department_id = {"type": "integer", "description": "部门 ID"}
 _role_id = {"type": "integer", "description": "角色 ID"}
 
+# 工具列表，包含所有工具的定义
 TOOLS = [
     _tool(
         "login",
@@ -227,6 +230,7 @@ TOOLS = [
     ),
 ]
 
+# 工具 API 路由映射，方便根据工具名称获取对应的 HTTP 方法和路径
 TOOL_API_ROUTES = {
     "login": ("POST", "/api/v1/login"),
     "logout": ("POST", "/api/v1/logout"),

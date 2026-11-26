@@ -639,7 +639,7 @@
     }
 
     async function refreshSessions() {
-      const response = await fetch("/api/sessions", { headers: { "X-Client-Id": clientId } });
+      const response = await fetch("/api/sessions", { headers: { "X-Client-Id": clientId } }); // X-Client-Id 用于区分不同用户的会话，前端生成并存储在 localStorage 中
       if (!response.ok) throw new Error("HTTP " + response.status);
       const data = await response.json();
       if (!Array.isArray(data.sessions)) throw new Error("会话列表格式无效");

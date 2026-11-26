@@ -10,10 +10,10 @@ from typing import Any, Generator
 
 # 判断是否运行在 Windows
 if os.name == "nt":
-    import msvcrt
+    import msvcrt # msvcrt 是 Windows 下的一个模块，提供了对 C 运行时库的访问，包括文件锁定功能
 else:
 # 运行在其他操作系统上
-    import fcntl
+    import fcntl # fcntl 是 Unix 系统下的一个模块，提供了对文件描述符的操作，包括文件锁定功能
 
 # 自定义错误，会话不存在
 class SessionNotFound(Exception):
@@ -21,16 +21,18 @@ class SessionNotFound(Exception):
 
 
 class SessionHistory:
+    # 初始化函数，初始化时自动调用
     def __init__(self, path: Path):
-        self.path = path
-        self._file_lock_path = path.with_suffix(path.suffix + ".lock")
-        self._file_lock = Lock()
-        self._locks: dict[str, LockType] = {}
-        self._locks_lock = Lock()
+        self.path = path  # 会话历史文件的路径
+        self._file_lock_path = path.with_suffix(path.suffix + ".lock") # 锁文件的路径，和会话历史文件同目录，后缀为 .lock
+        self._file_lock = Lock() # 线程锁，防止多个线程同时操作会话历史文件
+        self._locks: dict[str, LockType] = {} # 存储每个会话的锁，避免多个线程同时操作同一个会话
+        self._locks_lock = Lock() # 线程锁，防止多个线程同时操作 _locks 字典
 
+    # 获取指定会话的锁，如果不存在就创建一个新的锁
     def session_lock(self, session_id: str) -> LockType:
         with self._locks_lock:
-            return self._locks.setdefault(session_id, Lock())
+            return self._locks.setdefault(session_id, Lock()) # 如果字典中存在指定键，则返回该键对应的值；如果不存在，则创建一个新的键值对，并返回新创建的值
 
     # 在读写会话文件期间加锁，避免多个线程或进程同时操作
     # 生成器函数转换成上下文管理器，使它可以这样使用： with self._locked_file():
@@ -67,8 +69,9 @@ class SessionHistory:
     # 获取所有会话数据，并检查数据格式是否合法，数据合法就返回
     def _read(self) -> dict[str, dict[str, Any]]:
         try:
+            # 读取会话历史文件，如果文件不存在就返回空字典
             with self.path.open("r", encoding="utf-8") as file:
-                data = json.load(file)
+                data = json.load(file) # 将 JSON 格式的字符串转换成 Python 对象
         except FileNotFoundError:
             return {}
         # 格式检查
@@ -92,19 +95,23 @@ class SessionHistory:
                 raise ValueError(f"会话历史文件格式无效：{self.path}")
         return data
 
+    # 将会话数据写入文件
     def _write(self, sessions: dict[str, dict[str, Any]]) -> None:
         temp_path = None
         try:
+            # 使用临时文件写入会话历史，避免写入过程中出现异常导致文件损坏
             with tempfile.NamedTemporaryFile(
                 mode="w", encoding="utf-8", dir=self.path.parent,
                 prefix=".env.agent-history-", delete=False,
             ) as file:
                 temp_path = Path(file.name)
                 json.dump(sessions, file, ensure_ascii=False, indent=2)
+            # 将临时文件替换为会话历史文件，原子操作，避免文件损坏
             os.replace(temp_path, self.path)
         finally:
+            # 删除临时文件，如果它还存在的话
             if temp_path is not None and temp_path.exists():
-                temp_path.unlink()
+                temp_path.unlink() # 删除文件
 
     # 获取指定的会话，并返回其内容
     @staticmethod
@@ -121,6 +128,7 @@ class SessionHistory:
         with self._locked_file():
             sessions = self._read()
             now = datetime.now(timezone.utc).isoformat()
+            # 如果会话不存在，就创建一个新的会话
             if session_id not in sessions:
                 sessions[session_id] = {
                     "owner_id": owner_id,
@@ -129,10 +137,11 @@ class SessionHistory:
                     "messages": [],
                 }
             session = self._require_owner(sessions, session_id, owner_id)
-            session["messages"].append({"role": "user", "content": content})
+            messages: dict[str, Any] = {"role": "user", "content": content}
+            session["messages"].append(messages)
             session["updated_at"] = now
             self._write(sessions)
-            return session["messages"]
+            return session["messages"] # 返回当前会话的所有消息列表
 
     # 添加ai助手消息
     def add_assistant_message(
@@ -148,6 +157,7 @@ class SessionHistory:
             session["updated_at"] = datetime.now(timezone.utc).isoformat()
             self._write(sessions)
 
+    # 获取指定用户的所有会话列表，并按更新时间倒序排列
     def list_sessions(self, owner_id: str) -> list[dict[str, Any]]:
         with self._locked_file():
             sessions = self._read()
@@ -160,6 +170,7 @@ class SessionHistory:
             # 根据时间倒序排
             return sorted(result, key=lambda session: session["updated_at"], reverse=True)
 
+    # 获取指定会话的所有消息
     def get_messages(self, session_id: str, owner_id: str) -> list[dict[str, Any]]:
         with self._locked_file():
             sessions = self._read()

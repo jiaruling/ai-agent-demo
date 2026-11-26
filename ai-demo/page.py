@@ -1,6 +1,8 @@
 # ---------- 页面注册表 ----------
+# 前端基础URL
 BASE_URL_FRONT = "http://192.168.11.200:5187"
 
+# 页面注册表，包含所有页面的定义
 PAGE_REGISTRY = {
     "home": {"title": "首页", "path": "/home"},
     "operation_panel": {"title": "控制面板", "path": "/operationPanel"},

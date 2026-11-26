@@ -32,6 +32,7 @@ client = OpenAI(
 
 
 # ---------- 工具执行函数 ----------
+# 执行页面跳转工具，返回前端跳转信息
 def navigate_to_page(page_id):
     page = PAGE_REGISTRY.get(page_id)
     if not page:
@@ -39,10 +40,11 @@ def navigate_to_page(page_id):
     path = page["path"]
     return {"type": "navigation", "label": page["title"], "url": f"{BASE_URL_FRONT}{path}"}
 
+# 会话管理
 TOKEN_FILE = Path(__file__).resolve().parent / ".env.agent-tokens.json"
 TOKEN_LOCK = Lock()
 
-
+# 加载本地 Token 文件
 def _load_session_tokens() -> dict[str, dict[str, str]]:
     try:
         with TOKEN_FILE.open("r", encoding="utf-8") as file:
@@ -52,6 +54,7 @@ def _load_session_tokens() -> dict[str, dict[str, str]]:
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise RuntimeError(f"无法加载本地 Token 文件：{TOKEN_FILE}") from error
 
+    # 检查数据格式是否合法
     if not isinstance(data, dict) or any(
         not isinstance(session_id, str)
         or not isinstance(token, str)
@@ -59,21 +62,24 @@ def _load_session_tokens() -> dict[str, dict[str, str]]:
         for session_id, token in data.items()
     ):
         raise ValueError(f"本地 Token 文件格式无效：{TOKEN_FILE}")
+    # 返回一个字典，键是会话ID，值是一个包含accessToken的字典
     return {
         session_id: {"accessToken": token}
         for session_id, token in data.items()
     }
 
-
+# ---------- 会话 Token 管理 ----------
 SESSION_TOKENS: dict[str, dict[str, str]] = _load_session_tokens()
 
-
+# 更新指定会话的 Token，如果 tokens 为 None，则删除该会话的 Token
 def _update_session_tokens(session_id: str, tokens: dict[str, str] | None) -> None:
     with TOKEN_LOCK:
         updated = SESSION_TOKENS.copy()
         if tokens is None:
+            # 登出时删除会话的 Token
             updated.pop(session_id, None)
         else:
+            # 登录时更新会话的 Token
             updated[session_id] = tokens
 
         persisted = {
@@ -81,6 +87,7 @@ def _update_session_tokens(session_id: str, tokens: dict[str, str] | None) -> No
         }
         temp_path = None
         try:
+            # 使用临时文件写入 Token 文件，避免写入过程中出现异常导致文件损坏
             with tempfile.NamedTemporaryFile(
                 mode="w", encoding="utf-8", dir=TOKEN_FILE.parent,
                 prefix=".env.agent-tokens-", delete=False,
@@ -89,13 +96,14 @@ def _update_session_tokens(session_id: str, tokens: dict[str, str] | None) -> No
                 json.dump(persisted, file, ensure_ascii=False)
             os.replace(temp_path, TOKEN_FILE)
         finally:
+            # 删除临时文件，如果它还存在的话
             if temp_path is not None and temp_path.exists():
                 temp_path.unlink()
-        SESSION_TOKENS.clear()
-        SESSION_TOKENS.update(updated)
-
+        SESSION_TOKENS.clear() # 清空原有的 SESSION_TOKENS 字典
+        SESSION_TOKENS.update(updated) # 更新 SESSION_TOKENS 字典为最新的 Token 数据
 
 def _decode_api_response(body: bytes, charset: str | None = None) -> Any:
+    """ 解析api响应 """
     if not body:
         return None
     text = body.decode(charset or "utf-8", errors="replace")
@@ -104,22 +112,24 @@ def _decode_api_response(body: bytes, charset: str | None = None) -> Any:
     except json.JSONDecodeError:
         return text
 
-
+# 调用后端工具接口，返回结果
 def _call_backend_tool(name: str, args: dict, session_id: str) -> Any:
     route = TOOL_API_ROUTES.get(name)
     if route is None:
         return {"error": f"未知工具：{name}"}
 
     method, path_template = route
+    # 替换路径参数，例如 /api/v1/users/:userID 替换为 /api/v1/users/123
     path_params = re.findall(r":([A-Za-z][A-Za-z0-9_]*)", path_template)
     for param in path_params:
         if param not in args:
             return {"error": f"工具 {name} 缺少路径参数：{param}"}
         path_template = path_template.replace(
-            f":{param}", quote(str(args[param]), safe="")
+            f":{param}", quote(str(args[param]), safe="") # quote 用于对路径参数进行 URL 编码，safe="" 表示不保留任何字符不编码
         )
 
     headers = {"Accept": "application/json"}
+    # 如果当前会话有 accessToken，就把它加到请求头中
     with TOKEN_LOCK:
         token = SESSION_TOKENS.get(session_id, {}).get("accessToken")
     if token:
@@ -131,6 +141,7 @@ def _call_backend_tool(name: str, args: dict, session_id: str) -> Any:
         body = json.dumps(args, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json"
 
+    # 构建查询参数，GET 请求使用查询参数，POST 请求不使用
     query = (
         {
             key: value
@@ -140,8 +151,9 @@ def _call_backend_tool(name: str, args: dict, session_id: str) -> Any:
         if method == "GET"
         else {}
     )
-    query_string = urlencode(query, doseq=True)
-    url = f"{BASE_URL_BACKEND.rstrip('/')}{path_template}"
+    query_string = urlencode(query, doseq=True) # urlencode 用于将字典或序列转换为 URL 查询字符串
+    url = f"{BASE_URL_BACKEND.rstrip('/')}{path_template}" # rstrip('/') 用于去掉 BASE_URL_BACKEND 末尾的斜杠，避免重复斜杠
+    # 如果有查询参数，就把它加到 URL 后面
     if query_string:
         url = f"{url}?{query_string}"
 
@@ -149,9 +161,10 @@ def _call_backend_tool(name: str, args: dict, session_id: str) -> Any:
     try:
         with urlopen(request, timeout=30) as response:
             result = _decode_api_response(
-                response.read(), response.headers.get_content_charset()
+                response.read(), response.headers.get_content_charset() # get_content_charset() 用于获取响应头中的 Content-Type 字段的字符集，如果没有指定就返回 None
             )
     except HTTPError as error:
+        # 处理 HTTP 错误，返回错误信息和状态码
         with error:
             details = _decode_api_response(
                 error.read(), error.headers.get_content_charset()
@@ -161,8 +174,10 @@ def _call_backend_tool(name: str, args: dict, session_id: str) -> Any:
             message = details.get("msg") or details.get("message") or details
         return {"error": str(message), "status_code": error.code, "details": details}
     except (URLError, TimeoutError) as error:
+        # 处理网络错误，返回错误信息
         return {"error": f"请求后端接口失败：{error}"}
 
+    # 登录处理
     if name == "login":
         login_result = result
         if isinstance(result, dict) and "code" in result and "data" in result:
@@ -192,6 +207,7 @@ def _call_backend_tool(name: str, args: dict, session_id: str) -> Any:
             if key not in ("accessToken", "refreshToken")
         }
 
+    # 登出处理
     if name == "logout" and not (
         isinstance(result, dict)
         and (result.get("error") or result.get("code", 0) not in (0, "0"))
@@ -205,7 +221,7 @@ def _call_backend_tool(name: str, args: dict, session_id: str) -> Any:
 
     return result
 
-
+# 执行工具调用，返回结果
 def _execute_tool(name: str, args: Any, session_id: str) -> Any:
     if not isinstance(args, dict):
         return {"error": f"工具 {name} 的参数必须是 JSON 对象"}
@@ -218,8 +234,10 @@ def _execute_tool(name: str, args: Any, session_id: str) -> Any:
 
 
 # ---------- 会话历史 ----------
+# 初始化会话历史管理器，存储在当前目录下的 .env.agent-history.json 文件中
 HISTORY = SessionHistory(Path(__file__).resolve().parent / ".env.agent-history.json")
 
+# 聊天请求的参数格式
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
@@ -246,7 +264,7 @@ def _clean_history_for_planner(history: list) -> list:
     """只保留 user / assistant 的文本消息，丢掉 tool 消息，避免传给规划器时结构不合法"""
     cleaned = []
     for m in history:
-        role = m.get("role") if isinstance(m, dict) else getattr(m, "role", None)
+        role = m.get("role") if isinstance(m, dict) else getattr(m, "role", None) # getattr 用于获取对象的属性值，如果对象没有该属性，则返回默认值 None
         if role in ("user", "assistant"):
             content = m.get("content") if isinstance(m, dict) else getattr(m, "content", None)
             if content:
@@ -255,23 +273,27 @@ def _clean_history_for_planner(history: list) -> list:
 
 def plan_task(history: list) -> list[str]:
     """阶段 1：让模型输出步骤列表。失败时退化为单步执行原请求。"""
+    # 获取最近的历史消息，清理掉 tool 消息
     recent = _clean_history_for_planner(history)
+    # system 消息 + 最近的历史消息
     messages = [{"role": "system", "content": PLANNER_SYSTEM}] + recent
     content = ""
 
     # 优先用 JSON mode
     try:
+        # 调用大模型，要求输出 JSON 格式
         resp = client.chat.completions.create(
-            model="deepseek-flash",
+            model="deepseek-flash", # 使用 deepseek-flash 模型
             messages=messages,
             response_format={"type": "json_object"},
-            extra_body={"thinking": {"type": "disabled"}},
+            extra_body={"thinking": {"type": "disabled"}}, # 禁用模型的思考动画，减少延迟
         )
-        content = resp.choices[0].message.content or ""
+        content = resp.choices[0].message.content or "" # 获取模型输出的内容
     except Exception as e:
         # 执行失败执行普通模式
         print(f"[plan] JSON mode 调用失败，退化普通调用：{e}")
         try:
+            # 调用大模型，普通模式
             resp = client.chat.completions.create(
                 model="deepseek-flash",
                 messages=messages,
@@ -280,7 +302,7 @@ def plan_task(history: list) -> list[str]:
             content = resp.choices[0].message.content or ""
         except Exception as e2:
             print(f"[plan] 规划调用彻底失败：{e2}")
-            return [history[-1]["content"]]
+            return [history[-1]["content"]] # 退化为单步执行原请求
 
     # 解析 JSON，失败则兜底
     try:
@@ -323,26 +345,29 @@ def _agent_loop(
     for _ in range(max_rounds):
         resp = client.chat.completions.create(
             model="deepseek-flash",
-            messages=messages,
-            tools=TOOLS,
-            extra_body={"thinking": {"type": "disabled"}},
+            messages=messages, # 传入历史消息，包含用户消息、助手消息和工具调用结果
+            tools=TOOLS, # 传入工具定义，供模型调用
+            extra_body={"thinking": {"type": "disabled"}}, # 禁用模型的思考动画，减少延迟
         )
-        msg = resp.choices[0].message
+        msg = resp.choices[0].message # 获取模型输出的消息
 
         if not msg.tool_calls:
             return msg.content or "", navigation
 
-        messages.append(msg)
+        messages.append(msg) # 把模型的输出消息加入历史，供下一轮决策使用
         for tc in msg.tool_calls:
+            # 解析工具调用名称
             name = tc.function.name
             try:
+                # 解析工具调用参数
                 args = json.loads(tc.function.arguments)
             except json.JSONDecodeError:
                 result = {"error": f"工具 {name} 的参数不是有效 JSON"}
             else:
-                result = _execute_tool(name, args, session_id)
+                result = _execute_tool(name, args, session_id) # 执行工具调用，返回结果
             if isinstance(result, dict) and result.get("type") == "navigation":
                 navigation = result
+            # 把工具调用的结果加入历史，供下一轮决策使用
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
@@ -373,11 +398,11 @@ def _execute_step(
     ]
     return _agent_loop(messages, session_id)
 
-
+# 把多步骤的结果拼成 Markdown 汇总
 def _summarize(steps: list[str], replies: list[str]) -> str:
     """把多步骤结果拼成 Markdown 汇总"""
     parts = []
-    for i, (step, reply) in enumerate(zip(steps, replies), 1):
+    for i, (step, reply) in enumerate(zip(steps, replies), 1): # zip 用于把两个列表打包成一个迭代器，enumerate 用于获取索引和值，索引从1开始
         body = reply.strip() if reply and reply.strip() else "（无输出）"
         parts.append(f"**{i}. {step}**\n{body}")
     return "\n\n".join(parts)
@@ -388,11 +413,12 @@ def _summarize(steps: list[str], replies: list[str]) -> str:
 # ============================================================
 
 def run_agent(session_id: str, user_message: str, owner_id: str = "legacy"):
-    with HISTORY.session_lock(session_id):
+    with HISTORY.session_lock(session_id): # 串行处理同一会话的请求；退出 with 时自动释放锁
         return _run_agent(session_id, user_message, owner_id)
 
 
 def _run_agent(session_id: str, user_message: str, owner_id: str):
+    # 阶段 0：记录用户消息
     history = HISTORY.add_user_message(session_id, owner_id, user_message)
 
     # 阶段 1：规划
@@ -400,8 +426,8 @@ def _run_agent(session_id: str, user_message: str, owner_id: str):
     print(f"[plan] 步骤：{steps}")
 
     # 阶段 2：逐步执行
-    navigation = None # 存储前端跳转
-    prior_results: list[str] = [] # 之前的结果
+    navigation = None # 存储前端跳转信息
+    prior_results: list[str] = [] # 之前的结果，用于注入上下文，避免模型重复操作
     replies: list[str] = [] # 大模型的回复
 
     for i, step in enumerate(steps, 1): # 计数器从1开始，遍历从列表第一项(0号下标)开始
@@ -422,9 +448,9 @@ def _run_agent(session_id: str, user_message: str, owner_id: str):
     HISTORY.add_assistant_message(session_id, owner_id, final_reply, navigation)
 
     return {
-        "reply": final_reply,
-        "navigation": navigation,
-        "steps": steps,   # 新增字段，前端可以选择展示
+        "reply": final_reply, # 最终回复
+        "navigation": navigation, # 前端跳转信息
+        "steps": steps, # 新增字段，前端可以选择展示
     }
 
 
@@ -433,13 +459,13 @@ def _run_agent(session_id: str, user_message: str, owner_id: str):
 def _owner_id(client_id: str | None) -> str:
     if client_id is None:
         return "legacy"
-    if not re.fullmatch(r"[a-f0-9]{64}", client_id):
+    if not re.fullmatch(r"[a-f0-9]{64}", client_id): # 完全匹配 64 位十六进制字符串
         raise HTTPException(status_code=400, detail="无效的客户端标识")
     return client_id
 
 # 聊天接口
-@app.post("/api/chat")
-def chat(req: ChatRequest, x_client_id: Optional[str] = Header(default=None)): # 读取请求头 X-Client-Id：有值时传给 x_client_id，没有时使用 None
+@app.post("/api/chat")  # X-Client-Id 是前端请求时自己加在请求头中的
+def chat(req: ChatRequest, x_client_id: Optional[str] = Header(default=None)): # FastAPI 会自动读取请求头 X-Client-Id，并传给 x_client_id，没有时使用默认值 None。默认会将参数名中的下划线转换为请求头中的连字符
     session_id = req.session_id or str(uuid.uuid4()) # 获取session_id如果没有就新建
     try:
         result = run_agent(session_id, req.message, _owner_id(x_client_id))
@@ -449,7 +475,7 @@ def chat(req: ChatRequest, x_client_id: Optional[str] = Header(default=None)): #
 
 # 获取历史会话列表（不涉及大模型交互）
 @app.get("/api/sessions")
-def list_sessions(x_client_id: str = Header()):
+def list_sessions(x_client_id: str = Header()): # FastAPI 会自动读取请求头 X-Client-Id，并传给 x_client_id。请求头是必填的；缺少时 FastAPI 会返回 422
     return {"sessions": HISTORY.list_sessions(_owner_id(x_client_id))}
 
 # 返回指定历史会话的内容（不涉及大模型交互）
@@ -461,7 +487,7 @@ def get_session(session_id: str, x_client_id: str = Header()):
         raise HTTPException(status_code=404, detail="会话不存在")
     return {"session_id": session_id, "messages": messages}
 
-# 推荐操作（不涉及大模型交互）
+# 页面推荐操作（不涉及大模型交互）
 @app.get("/api/suggestions")
 def suggestions():
     # 打开页面
