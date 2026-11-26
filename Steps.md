@@ -114,6 +114,15 @@ python3 hello_deepseek.py
 ```
 如果终端打印出一句类似“我已经准备好协助你……”的回复，第一步就完成了
 
+### 10. python环境导入导出
+
+```bash
+# 当前环境中的依赖导出
+pip freeze > requirements.txt
+# 在新的环境中恢复所有依赖
+pip install -r requirements.txt
+```
+
 ## 二、工具调用（Function Calling）
 
 ### 1. 关键概念
